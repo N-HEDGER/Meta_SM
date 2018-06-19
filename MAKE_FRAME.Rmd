@@ -1,0 +1,486 @@
+---
+title: "R Notebook"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+
+# Index
+
+| Section | Description | Status |
+| --- | --- | --- |
+| [Data preparation](#prep) | Preparing the data | **Complete** |
+| [Robustness checks](#robust) | Fit global model and check robustness | **Complete** |
+| [Dependency checks](#depend) | Characterise the influence of dependency | **Complete** |
+| [Model comparison](#model) | Find the model that best explains the data | *Incomplete* |
+
+***
+
+
+<a id='prep'></a>
+# Load and prepare the data.
+
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+setwd("/Users/nicholashedger/Documents/Meta_SM")
+FILE=read.csv('Orienting.xlsx - Sheet1_pooled.csv')
+head(FILE)
+```
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+library(compute.es)
+```
+
+Function for computing the variance of d. 
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+variance_d=function(n1,n2,d){
+  var=(n1+n2)/ (n1*n2)+ (d^2)/ (2*(n1+n2))
+  return(var)
+}
+```
+
+Make a couple of preparations to the data. Firstly, remove the data that have been flagged. Also, make sure that there are no NAs in the 'direction' field.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+FILE=FILE[FILE$Flag==0,]
+FILE$dir[is.na(FILE$dir)] <- 100
+
+```
+
+Now loop through the entire file and calculate the effect sizes and standard errors.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+
+FILE$Ds=rep(0,nrow(FILE))
+FILE$SE=rep(0,nrow(FILE))
+
+
+# Method 1 - means and SD's
+for (i in 1:nrow(FILE)){
+  if (FILE$METHOD[i]==1 && FILE$dir[i]==1){
+    
+    # Means and SD's
+    FILE$Ds[i]=abs(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+    # Method 2 - t value
+  } else if (FILE$METHOD[i]==2 && FILE$dir[i]==1){
+    # t 
+    FILE$Ds[i]=tes(FILE$t[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d
+    FILE$SE[i]=sqrt(tes(FILE$t[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+  } else if (FILE$METHOD[i]==3 && FILE$dir[i]==1){
+    
+    # Method 3 - f value
+    FILE$Ds[i]=fes(FILE$F[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d
+    FILE$SE[i]=sqrt(fes(FILE$F[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+  } else if (FILE$METHOD[i]==4 && FILE$dir[i]==1){
+   
+   # Method 4 - p value 
+    FILE$Ds[i]=pes(FILE$p[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d
+    FILE$SE[i]=sqrt(pes(FILE$p[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+    # Method 5 - d
+  }  else if (FILE$METHOD[i]==5 && FILE$dir[i]==1){
+    FILE$Ds[i]=FILE$d[i]
+    FILE$SE[i]=sqrt(variance_d(FILE$N_NT[i],FILE$N_ASD[i],FILE$Ds[i]))
+    
+  }  else if (FILE$METHOD[i]==1 && FILE$dir[i]==0){
+    FILE$Ds[i]=-abs(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+    
+    # Now do the same but reverse the direction.
+    
+  } else if (FILE$METHOD[i]==2 && FILE$dir[i]==0){
+    # t 
+    FILE$Ds[i]=-abs(tes(FILE$t[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(tes(FILE$t[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+  } else if (FILE$METHOD[i]==3 && FILE$dir[i]==0){
+    # f
+    
+    FILE$Ds[i]=-abs(fes(FILE$F[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(fes(FILE$F[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+  } else if (FILE$METHOD[i]==4 && FILE$dir[i]==0){
+    # p
+    
+    FILE$Ds[i]=-abs(pes(FILE$p[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(pes(FILE$p[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+    
+  }  else if (FILE$METHOD[i]==5 && FILE$dir[i]==0){
+    FILE$Ds[i]=-abs(FILE$d[i])
+    FILE$SE[i]=sqrt(variance_d(FILE$N_NT[i],FILE$N_ASD[i],FILE$Ds[i]))
+    
+  }    else if (FILE$METHOD[i]==1){
+    FILE$Ds[i]=abs(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$d)
+    FILE$SE[i]=sqrt(mes(FILE$M_SOC_NT[i],FILE$M_SOC_ASD[i],FILE$SD_SOC_TD[i],FILE$SD_SOC_ASD[i],FILE$N_NT[i],FILE$N_ASD[i],verbose=FALSE)$var.d)
+
+  
+}
+}
+  
+```
+
+Now put all the relevant info into a dataframe and define some factors.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+library(stringr)
+library(metafor)
+library(ggplot2)
+library(reshape2)
+library(pracma)
+# This recodes the sring of stimulus types into a numeric variable.
+FILE$STIM2=ifelse(str_detect(FILE$STIM_TYPE,"IMAGE"),1,2)
+
+
+FRAME=data.frame(cbind(FILE$Ds,FILE$SE,FILE$MEASURE,FILE$INSTRUCT,FILE$AOIn,FILE$STIM2,FILE$STIM_DUR,FILE$Pool))
+colnames(FRAME)=c("Ds","SE","MEASURE","INSTRUCT","AOI","STIM","STIMDUR","POOL")
+
+
+FRAME$MEASURE=factor(FRAME$MEASURE,levels=c(1,2,3),labels=c("Total Gaze Duration","Latency to First Fixation","First fixation proportion"))
+
+
+FRAME$INSTRUCT=factor(FRAME$INSTRUCT,levels=c(1,2,3,4,5,6),labels=c("Free-viewing","Active engage","Active Present","Active social task","Active nonsocial task","Active joint- attention"))
+
+FRAME$AOI=factor(FRAME$AOI,levels=c(1,2,3,4,5),labels=c("Face","Person","Social Scene","Biological Motion","Eyes"))
+
+FRAME$STIM=factor(FRAME$STIM,levels=c(1,2),labels=c("Image","Video"))
+
+```
+
+
+Fit an intercept only model and do some plotting.
+
+```{r,fig.width=7,fig.height=18,message=FALSE,warning=FALSE,error=FALSE}
+
+model=rma(data=FRAME,yi=Ds,sei=SE)
+
+
+old <- theme_set(theme_classic(base_size=14))
+plotforest=function(model){
+  
+  frame=get(as.character(model$call$data))
+  frame$yi=get(as.character(model$call$yi),frame)
+  frame$sei=get(as.character(model$call$sei),frame)
+  frame$n=c(1:nrow(frame))
+  frame$n=factor(frame$n)
+  frame$upr=frame$yi+(1.96*frame$sei)
+  frame$lwr=frame$yi-(1.96*frame$sei)
+  frame$d=as.numeric(model$b)
+  lwr=as.numeric(model$ci.lb)
+  upr=as.numeric(model$ci.ub)
+  forest=ggplot(frame, aes(n,yi))+geom_rect(xmax=-1,xmin=length(frame$n)+1,ymin=lwr,ymax=upr,fill="steelblue2",alpha=.2)+ geom_hline(aes(yintercept=d),linetype="dashed",colour="white",size=1) +scale_x_discrete(limits = rev(levels(frame$n)),breaks=seq(1,max(as.numeric(frame$n),5))) + geom_hline(aes(yintercept=0),linetype="solid",size=1,colour="gray45")+geom_point(size=4)+geom_errorbar(aes(ymin=lwr, ymax=upr),size=1)+coord_flip()+ylab("Effect Size")+xlab("Study")
+  return(forest)
+  
+}
+
+PLOT=plotforest(model)
+PLOT
+```
+
+<a id='robust'></a>
+# Robustness checks.
+
+## Leave one out
+
+Now do some typical robustness checks. Firstly do a leave one out test to identify influential cases. One way of checking for 'outliers' is to see which effect sizes have the most influence on model statistics when they are 'left out' from the analysis.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+
+LOOFRAME=data.frame(leave1out(model, digits = 3))
+
+LOOSTRUCT=function(LOOFRAME){
+  
+  x=new.env()
+  LOOFRAME2=melt(LOOFRAME)
+  LOOFRAME2$eff=1:nrow(LOOFRAME)
+  LOOFRAME2$M=rep(0,nrow(LOOFRAME2))
+  LOOFRAME2$sd=rep(0,nrow(LOOFRAME2))
+  LOOFRAME2$upr=rep(0,nrow(LOOFRAME2))
+  LOOFRAME2$lwr=rep(0,nrow(LOOFRAME2))
+  
+  for (i in 1:length (colnames(LOOFRAME))){
+    LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$M=rep(mean(LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$value))
+LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$sd=rep(sd(LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$value))
+
+
+LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$upr=rep(LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$M[1]+(3*LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$sd[1]))
+
+LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$lwr=rep(LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$M[1]-(3*LOOFRAME2[LOOFRAME2$variable==colnames(LOOFRAME)[i],]$sd[1]))
+    
+  }
+  
+  LOOFRAME2$outlier=factor(ifelse(LOOFRAME2$value> LOOFRAME2$upr | LOOFRAME2$value< LOOFRAME2$lwr,1,2))
+
+   assign('PLOT', ggplot(LOOFRAME2,(aes(x=eff,y=value)))+geom_ribbon(aes(ymin=lwr,ymax=upr),fill='gray90')+scale_colour_discrete(guide=FALSE)+geom_hline(aes(yintercept=M))+geom_point(aes(colour=outlier))+geom_line()+facet_wrap(~variable,scales="free"),envir=x)
+   
+   assign('FRAME', LOOFRAME2,envir=x)
+   
+ assign('OUTLIERS',unique(x$FRAME[which(x$FRAME$outlier==1),]$eff),envir=x)
+ 
+  return(x)
+}
+
+
+x=LOOSTRUCT(LOOFRAME)
+
+x$PLOT
+
+```
+
+The below studies are defined as outiers according to at least one metric.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+FILE$NAME[x$OUTLIERS]
+```
+
+I checked over these effects and none seem to be errors. In an earlier iteration of this check I managed to find a case where I had accidentally input standard errors instead of standard deviations. I also found a case where the authors appeared to report a repeated measures t test instead of independent samples - since this is clearly wrong I used the means and SDs instead.
+
+The Billecci and Fischer studies are 'outliers' because they all yield quite large effects in the negative direction. The remaining studies happen to be quite large postive effects. The Liang study is particularly large because there are ceiling effects in this study, which makes the variances very small (and therefore the effect size large). All things considered -  I don't think that any of these studies need removing - they aren't 'errors' anyway.
+
+<a id='depend'></a>
+# Dependency
+
+Ok now we need to deal with dependency in our effect sizes. We have some samples contributing multiple effect sizes and so this violates independence. There are two ways of approaching this.
+
+## 3-level model
+
+We can use a structural equation modeling approach to partition the heterogeneity into that occuring between level 2 (between conditions) and between level 3 (between samples).
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+library(metaSEM)
+
+l2mod=meta(y=Ds, v=SE^2, data=FRAME)
+
+l3mod=meta3(y=Ds, v=SE^2, cluster=POOL, data=FRAME)
+
+anova(l3mod, l2mod)
+
+```
+
+A three level model has significantly superior fit to a 2 level model. This indicates the presence of dependency. Another thing that we can do is just create a bunch of datasets where we eliminate the dependency in the data.
+
+Here I define a function that goes through each independent sample and randomly selects one single effect size per sample.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+
+MAKE_DATASETS=function(FRAME,N){
+  newenv=new.env()
+  cil=rep(0,N)
+  cih=rep(0,N)
+  eff=rep(0,N)
+  n=1:N
+  for (D in 1:N){
+  DATA=data.frame()
+  for (i in 1:length (unique(FRAME$POOL))){
+  samp=FRAME[FRAME$POOL==unique(FRAME$POOL)[i],]
+  subset=samp[as.numeric(randi(nrow(samp))),]
+  DATA=rbind(subset,DATA)
+  }
+   assign(strcat('DATASET_',num2str(D,fmt=0)),DATA,envir=newenv)
+   assign(strcat('MODEL_',num2str(D,fmt=0)),rma(data=DATA,yi=Ds,sei=SE),envir=newenv)
+   mod=rma(data=DATA,yi=Ds,sei=SE)
+   eff[D]=mod$b
+   cil[D]=mod$ci.lb
+   cih[D]=mod$ci.ub
+  }
+  tempframe=data.frame(cbind(eff,cil,cih,n))
+  tempframe$n=factor(tempframe$n)
+  assign('summary',tempframe,envir=newenv)
+
+  assign('summary_plot',ggplot(tempframe, aes(n,eff))+scale_x_discrete(limits = rev(levels(tempframe$n)),breaks=seq(1,max(as.numeric(tempframe$n),5)))+geom_point(size=4)+geom_errorbar(aes(ymin=cil, ymax=cih),size=1)+coord_flip()+ylab("Effect Size")+xlab("Study"),envir=newenv)
+  
+  
+  return(newenv)
+}
+
+```
+
+Make 100 datasets with dependency removed. Plot the pooled effect size in each dataset.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+FRAME$vi=FRAME$SE^2
+SET=MAKE_DATASETS(FRAME,100)
+qplot(SET$summary$eff,binwidth=.002)
+
+```
+
+Removing dependency doesn't change the pooled effect size drastically. 
+
+<a id='model'></a>
+
+# Model Comparison
+
+Here we can just test every possible model, imposing the restriction that we only allow up to pairwise interactions. 
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+
+FRAME <- FRAME[!apply(FRAME[,c("MEASURE", "INSTRUCT", "AOI", "STIM")], 1, anyNA),]
+
+
+library(glmulti)
+
+rma.glmulti <- function(formula, data, ...)
+   rma(formula, vi, data=data, method="ML", ...)
+
+res_n <- glmulti(Ds ~ MEASURE + INSTRUCT + AOI + STIM, data=FRAME,
+               level=2, fitfunction=rma.glmulti, crit="aic",method='d')
+```
+
+This means that we are testing 113 models. Now perform the fitting directly.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+res_test <- glmulti(Ds ~ MEASURE + INSTRUCT + AOI + STIM, data=FRAME,
+               level=2, fitfunction=rma.glmulti, crit="aicc",plotty=FALSE)
+
+```
+
+Look at the AIC rankings.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+tmp <- weightable(res_test)
+head(tmp)
+```
+
+The best fitting model involves measure, AOI, stimtype and pairwise interactions betweem i) AOI and measure ii) stim and measure ii) stim and AOI.
+
+Plot the model predictions.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+predframe=cbind(FRAME,predict(res_test@objects[[1]])$pred,predict(res_test@objects[[1]])$ci.lb,predict(res_test@objects[[1]])$ci.ub)
+
+colnames(predframe)=c(colnames(predframe)[1:9],"pred","cil","ciu")
+
+ggplot(predframe,(aes(x=pred,y=Ds)))+geom_errorbar(aes(ymin=cil,ymax=ciu,colour=MEASURE),width=0.1)+geom_point(aes(colour=MEASURE,shape=AOI))+facet_grid(.~STIM)
+```
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+summary(res_test@objects[[1]])
+```
+
+Seems as though we can actually explain a fair bit of variance here. Now take a look at the importance of each model term. 
+
+```{r,message=FALSE,warning=FALSE,error=FALSE}
+plot(res_test, type="s")
+```
+
+Lets plot the effects of stim, AOI and measure seperarely to get a more clear idea of what is going on.
+
+```{r,message=FALSE,warning=FALSE,error=FALSE,fig.width=18,fig.height=7,message=FALSE,warning=FALSE,error=FALSE}
+PLOTMAIN=function(MODEL){
+  pred=predict(MODEL)
+  MODERATOR=as.character(MODEL$call$mods[2])
+  FRAME=cbind(get(as.character(MODEL$call$data)),pred$pred,pred$ci.lb,pred$ci.ub)
+  #Scale the studies sych that larger studies (smaller SE) are represented larger on the plot.
+  FRAME$pointsize=10-((10-1)/(max(FRAME$SE)-min(FRAME$SE))*(FRAME$SE-max(FRAME$SE))+10)+1
+  PLOT=ggplot(FRAME, aes(x=get(MODERATOR),y=Ds))+geom_point(aes(colour=get(MODERATOR),size=pointsize),position = position_jitter(w = 0.2),alpha=.2)+
+  geom_errorbar(aes(ymin=FRAME[max(col(FRAME))-2],ymax=FRAME[max(col(FRAME))-1],x=get(MODERATOR),colour=get(MODERATOR)),width=0.1,size=3)+
+  scale_colour_discrete(guide='none')+scale_size_area(guide='none')+ylab("Effect Size")+xlab(MODERATOR)+geom_hline(yintercept=0)
+  return(PLOT)}
+
+# Apply to model object.
+STIMmod=rma(yi=Ds,sei=SE,data=FRAME,mods=~STIM)
+AOImod=rma(yi=Ds,sei=SE,data=FRAME,mods=~AOI)
+MEASUREmod=rma(yi=Ds,sei=SE,data=FRAME,mods=~MEASURE)
+
+multiplot(PLOTMAIN(STIMmod),PLOTMAIN(AOImod),PLOTMAIN(MEASUREmod),cols=3)
+
+
+```
+
+Overall impression - images seem to generate larger effects than videos. Faces seem to yield small and inconsistent effects. I can't really see much going on with measure as a moderator - nonetheless the model selection seemed to indicate that it is important in some way.
+
+
+Here we can obtain the model averaged-parameter estimates. This allows us to take into account the uncertainty with respect to which model is 'best' as well as the uncertainty of each model itself.
+
+
+```{r}
+
+setMethod('getfit', 'rma.uni', function(object, ...) {
+   if (object$test=="z") {
+      cbind(estimate=coef(object), se=sqrt(diag(vcov(object))), df=Inf)
+   } else {
+      cbind(estimate=coef(object), se=sqrt(diag(vcov(object))), df=object$k-object$p)
+   }
+})
+
+round(coef(res_test), 4)
+
+
+```
+
+Now we should try and do the same sort of thing, but apply the analyses to all of the datasets we created where we eliminated dependency. Afterwards we can look at which model performs best under each eventuality where we eliminate dependency.
+
+
+```{r,message=FALSE,warning=FALSE,error=FALSE,fig.width=90,fig.height=18,message=FALSE,warning=FALSE,error=FALSE}
+
+largeframe=data.frame()
+
+for (i in 1:100){
+res_temp = glmulti(Ds ~ MEASURE + INSTRUCT + AOI + STIM, data=get(strcat('DATASET_',num2str(i,fmt=0)),envir=SET),level=2, fitfunction=rma.glmulti, crit="aic",plotty = FALSE,report=FALSE)
+
+tmp <- cbind(weightable(res_temp),rep(i))
+  largeframe=rbind(largeframe,tmp)
+}
+
+# Plot every 5 datasets
+
+colnames(largeframe)=c("model","aicc","weights","data")
+ggplot(largeframe[largeframe$data %in% round(linspace(1,100,20)),],aes(x=model,y=aicc))+geom_point()+facet_wrap(~data,nrow=5)+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
